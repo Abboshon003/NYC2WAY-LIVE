@@ -315,20 +315,19 @@ function updateMarker(driver) {
 }
 
 function createDriverIcon(driver) {
-  const image = driver.driverImage
-    ? `<img src="${escapeAttr(driver.driverImage)}" alt="" onerror="this.style.display='none'">`
-    : `<span>${escapeHtml(driver.carNo)}</span>`;
+  const bubbleColor = getCarColor(driver.carNo);
 
   return L.divIcon({
     className: 'driver-marker',
-    iconSize: [56, 74],
-    // The GPS point is the center of the face bubble. The label sits underneath and does not affect anchoring.
+    iconSize: [56, 56],
+    // The GPS point is the exact center of the number bubble.
     iconAnchor: [28, 28],
     popupAnchor: [0, -28],
     html: `
-      <div class="driver-pin">
-        <div class="driver-bubble">${image}</div>
-        <div class="driver-label">${escapeHtml(driver.carNo)}</div>
+      <div class="driver-pin compact">
+        <div class="driver-bubble number-bubble" style="background:${bubbleColor};">
+          <span>${escapeHtml(driver.carNo)}</span>
+        </div>
       </div>
     `
   });
@@ -474,6 +473,30 @@ function readCache(key) {
 
 function writeCache(key, value, ttlMs) {
   localStorage.setItem(key, JSON.stringify({ value, expiresAt: Date.now() + ttlMs }));
+}
+
+
+function getCarColor(carNo) {
+  const colors = [
+    '#2563eb', // blue
+    '#16a34a', // green
+    '#ea580c', // orange
+    '#9333ea', // purple
+    '#db2777', // pink
+    '#0891b2', // cyan
+    '#dc2626', // red
+    '#4f46e5', // indigo
+    '#0f766e', // teal
+    '#ca8a04'  // gold
+  ];
+
+  const value = String(carNo || '0');
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+
+  return colors[hash % colors.length];
 }
 
 function fallbackAvatar(carNo) {
