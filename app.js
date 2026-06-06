@@ -4,8 +4,8 @@ const CONFIG = {
   detailBaseUrl: 'https://www.nyc2way.com/nyc2waymap/frmOneCarInfo.aspx',
   imagePrefix: 'https://www.nyc2way.com/nyc2waymap/img/',
   maptilerKey: 'YCrc4LIIYxSwpRRF7RiM',
-  detailCacheMs: 5 * 60 * 1000,
-  autoRefreshMs: 30000,
+  detailCacheMs: 60 * 1000,
+  autoRefreshMs: 60 * 1000,
   maxConcurrentDetailFetches: 3,
   defaultCenter: [40.7128, -74.006],
   defaultZoom: 11
@@ -111,6 +111,7 @@ async function loadFleetCars() {
 
 async function loadDrivers() {
   try {
+    const previousById = new Map(state.drivers.map(d => [d.id, d]));
     els.statusText.textContent = 'Updating drivers...';
 
     const xmlText = await fetchText(CONFIG.proxyUrl + encodeURIComponent(CONFIG.xmlUrl));
@@ -120,27 +121,38 @@ async function loadDrivers() {
     const basicDrivers = markerNodes.map((node) => {
       const carNo = clean(node.getAttribute('CarNo'));
       const comp = clean(node.getAttribute('Comp'));
+      const id = `${carNo}-${comp}`;
+      const previous = previousById.get(id) || {};
+      const inShift = clean(node.getAttribute('InShift'));
+
       return {
-        id: `${carNo}-${comp}`,
+        id,
         carNo,
         comp,
         lat: Number(node.getAttribute('lat')),
         lng: Number(node.getAttribute('lng')),
-        inShift: clean(node.getAttribute('InShift')),
+        inShift,
         shiftDay: clean(node.getAttribute('shiftday')),
         confNo: clean(node.getAttribute('ConfNo')),
         carType: clean(node.getAttribute('CarType')),
         lastUpdated: new Date().toLocaleTimeString(),
-        driverName: '',
-        driverImage: '',
-        labelText: '',
-        tripNumber: '—',
-        destination: 'Destination unavailable',
-        status: 'Active'
+        driverName: previous.driverName || '',
+        driverImage: previous.driverImage || '',
+        labelText: previous.labelText || '',
+        tripNumber: previous.tripNumber || '—',
+        destination: previous.destination || 'No destination listed',
+        status: inShift === '1' ? 'In shift' : 'Out of shift'
       };
     }).filter(d => d.carNo && Number.isFinite(d.lat) && Number.isFinite(d.lng));
 
     state.drivers = basicDrivers;
+    if (state.selectedDriver) {
+      const refreshedSelected = state.drivers.find(d => d.id === state.selectedDriver.id);
+      if (refreshedSelected) {
+        state.selectedDriver = refreshedSelected;
+        populateBottomSheet(refreshedSelected);
+      }
+    }
     renderDrivers();
 
     const fleetCount = state.drivers.filter(d => isFleetCar(d.carNo)).length;
@@ -243,8 +255,8 @@ async function getDriverDetails(driver) {
     labelText,
     driverName: parsed.driverName || `Car ${driver.carNo}`,
     tripNumber: parsed.tripNumber || '—',
-    destination: parsed.destination || 'Destination unavailable',
-    status: parsed.status || (driver.inShift === '1' ? 'In shift' : 'Unknown'),
+    destination: parsed.destination || 'No destination listed',
+    status: parsed.status || (driver.inShift === '1' ? 'In shift' : 'Out of shift'),
     detailUrl
   };
 
@@ -365,7 +377,7 @@ function populateBottomSheet(driver) {
   els.sheetComp.textContent = driver.comp || '—';
   els.sheetTrip.textContent = driver.tripNumber || '—';
   els.sheetStatus.textContent = driver.status || '—';
-  els.sheetDestination.textContent = driver.destination || 'Destination unavailable';
+  els.sheetDestination.textContent = driver.destination || 'No destination listed';
 }
 
 function closeSheet() {
@@ -422,18 +434,34 @@ function isFleetCar(carNo) {
 function parseLabelText(text) {
   const normalized = clean(text);
 
-  const tripNumber = matchValue(normalized, /(trip|conf|confirmation|job)\s*(no|#|number)?\s*[:#-]?\s*([a-z0-9-]+)/i);
-  const destination = matchValue(normalized, /(dest|destination|to)\s*[:#-]?\s*([^\n\r|]+)/i);
-  const status = matchValue(normalized, /(status)\s*[:#-]?\s*([^\n\r|]+)/i);
+  let tripNumber = matchValue(normalized, /(trip|conf|confirmation|job)\s*(no|#|number)?\s*[:#-]?\s*([a-z0-9-]+)/i);
+  let destination = matchValue(normalized, /(dest|destination|drop.?off|to)\s*[:#-]?\s*([^\n\r|]+)/i);
+  let status = matchValue(normalized, /(status)\s*[:#-]?\s*([^\n\r|]+)/i);
+
+  // NYC2WAY often writes useful trip/status info like: "-Onscene 2659764482".
+  const onsceneMatch = normalized.match(/\bon\s*scene\s*([0-9]+)/i) || normalized.match(/\bonscene\s*([0-9]+)/i);
+  if (onsceneMatch) {
+    status = 'Onscene';
+    tripNumber = tripNumber || onsceneMatch[1];
+  }
+
+  const assignedMatch = normalized.match(/\bassigned\s*([0-9]+)/i);
+  if (assignedMatch) {
+    status = status || 'Assigned';
+    tripNumber = tripNumber || assignedMatch[1];
+  }
 
   let driverName = '';
   const nameMatch = normalized.match(/(driver|name)\s*[:#-]?\s*([^\n\r|]+)/i);
   if (nameMatch) driverName = clean(nameMatch[2]);
 
   if (!driverName) {
-    const firstLine = normalized.split(/\n|\r|\|/).map(clean).find(Boolean);
-    if (firstLine && !/car|trip|destination|status|comp/i.test(firstLine)) driverName = firstLine;
+    const firstPart = normalized.split(/ - |\|/).map(clean).find(Boolean);
+    if (firstPart && !/car|trip|destination|status|comp|updated|onscene/i.test(firstPart)) driverName = firstPart;
   }
+
+  // Do not invent a destination. Some NYC2WAY driver pages simply do not list one.
+  if (!destination) destination = 'No destination listed';
 
   return { driverName, tripNumber, destination, status };
 }
