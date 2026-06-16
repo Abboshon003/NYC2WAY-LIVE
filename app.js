@@ -25,10 +25,15 @@ const state = {
 const els = {
   statusText: document.getElementById('statusText'),
   refreshBtn: document.getElementById('refreshBtn'),
+  darkModeBtn: document.getElementById('darkModeBtn'),
+  fitFleetBtn: document.getElementById('fitFleetBtn'),
+  liveDot: document.getElementById('liveDot'),
   searchInput: document.getElementById('searchInput'),
   clearSearchBtn: document.getElementById('clearSearchBtn'),
   fleetTab: document.getElementById('fleetTab'),
   allTab: document.getElementById('allTab'),
+  fleetCount: document.getElementById('fleetCount'),
+  allCount: document.getElementById('allCount'),
   bottomSheet: document.getElementById('bottomSheet'),
   closeSheetBtn: document.getElementById('closeSheetBtn'),
   sheetPhoto: document.getElementById('sheetPhoto'),
@@ -53,6 +58,7 @@ init();
 
 async function init() {
   initMap();
+  initDarkMode();
   bindEvents();
   await loadFleetCars();
   await loadDrivers();
@@ -69,16 +75,39 @@ function initMap() {
   }).addTo(state.map);
 }
 
+function initDarkMode() {
+  const saved = localStorage.getItem('nyc2way-theme');
+  if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+}
+
 function bindEvents() {
   els.refreshBtn.addEventListener('click', async () => {
     await loadFleetCars();
     await loadDrivers();
   });
 
-  els.searchInput.addEventListener('input', () => {
-    renderDrivers();
-    scheduleHydrateVisibleDetails();
+  els.darkModeBtn.addEventListener('click', () => {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('nyc2way-theme', 'light');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('nyc2way-theme', 'dark');
+    }
   });
+
+  els.fitFleetBtn.addEventListener('click', fitToFleet);
+
+  let searchDebounce = null;
+  els.searchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      renderDrivers();
+      scheduleHydrateVisibleDetails();
+    }, 150);
+  });
+
   els.clearSearchBtn.addEventListener('click', () => {
     els.searchInput.value = '';
     renderDrivers();
@@ -90,6 +119,24 @@ function bindEvents() {
   els.closeSheetBtn.addEventListener('click', closeSheet);
   els.detailsBtn.addEventListener('click', openDetailsPage);
   els.backBtn.addEventListener('click', () => els.detailsPage.classList.add('hidden'));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (!els.detailsPage.classList.contains('hidden')) {
+        els.detailsPage.classList.add('hidden');
+      } else {
+        closeSheet();
+      }
+    }
+  });
+}
+
+function fitToFleet() {
+  const fleetDrivers = state.drivers.filter(d => isFleetCar(d.carNo));
+  if (!fleetDrivers.length) return;
+
+  const bounds = L.latLngBounds(fleetDrivers.map(d => [d.lat, d.lng]));
+  state.map.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
 }
 
 async function loadFleetCars() {
@@ -110,6 +157,7 @@ async function loadFleetCars() {
 }
 
 async function loadDrivers() {
+  setRefreshLoading(true);
   try {
     const previousById = new Map(state.drivers.map(d => [d.id, d]));
     els.statusText.textContent = 'Updating drivers...';
@@ -146,6 +194,10 @@ async function loadDrivers() {
     }).filter(d => d.carNo && Number.isFinite(d.lat) && Number.isFinite(d.lng));
 
     state.drivers = basicDrivers;
+
+    // Mark live data as fresh
+    els.liveDot.classList.add('active');
+
     if (state.selectedDriver) {
       const refreshedSelected = state.drivers.find(d => d.id === state.selectedDriver.id);
       if (refreshedSelected) {
@@ -166,7 +218,15 @@ async function loadDrivers() {
   } catch (error) {
     console.error(error);
     els.statusText.textContent = 'Could not load NYC2WAY data.';
+    els.liveDot.classList.remove('active');
+  } finally {
+    setRefreshLoading(false);
   }
+}
+
+function setRefreshLoading(loading) {
+  els.refreshBtn.disabled = loading;
+  els.refreshBtn.classList.toggle('loading', loading);
 }
 
 async function hydrateDriverDetailsProgressively(drivers) {
@@ -283,18 +343,26 @@ function renderDrivers(updateStatus = true) {
 
   state.filteredDrivers = drivers;
   syncMarkers(drivers);
+  updateTabCounts();
 
   if (updateStatus) {
     els.statusText.textContent = buildStatusText();
   }
 }
 
+function updateTabCounts() {
+  const fleetTotal = state.drivers.filter(d => isFleetCar(d.carNo)).length;
+  els.fleetCount.textContent = fleetTotal;
+  els.allCount.textContent = state.drivers.length;
+}
+
 function buildStatusText() {
   const shown = state.filteredDrivers.length;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (state.activeTab === 'fleet') {
-    return `${shown} fleet drivers shown`;
+    return `${shown} fleet drivers • updated ${time}`;
   }
-  return `${shown} drivers shown`;
+  return `${shown} drivers shown • updated ${time}`;
 }
 
 function syncMarkers(visibleDrivers) {
@@ -351,7 +419,7 @@ async function openBottomSheet(driverId) {
 
   state.selectedDriver = driver;
   populateBottomSheet(driver);
-  els.bottomSheet.classList.remove('hidden');
+  els.bottomSheet.classList.add('sheet-open');
 
   // Fetch the driver photo/info only when needed.
   if (!driver.driverImage && !driver.labelText) {
@@ -376,12 +444,24 @@ function populateBottomSheet(driver) {
   els.sheetCarNo.textContent = driver.carNo || '—';
   els.sheetComp.textContent = driver.comp || '—';
   els.sheetTrip.textContent = driver.tripNumber || '—';
-  els.sheetStatus.textContent = driver.status || '—';
+
+  const statusEl = els.sheetStatus;
+  statusEl.textContent = driver.status || '—';
+  statusEl.className = getStatusClass(driver.status);
+
   els.sheetDestination.textContent = driver.destination || 'No destination listed';
 }
 
+function getStatusClass(status) {
+  if (!status) return '';
+  const s = status.toLowerCase();
+  if (s.includes('in shift') || s.includes('onscene') || s.includes('assigned')) return 'status-in-shift';
+  if (s.includes('out')) return 'status-out-shift';
+  return '';
+}
+
 function closeSheet() {
-  els.bottomSheet.classList.add('hidden');
+  els.bottomSheet.classList.remove('sheet-open');
   state.selectedDriver = null;
 }
 

@@ -11,11 +11,18 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div>
-        <h1>NYC2WAY Live</h1>
-        <p id="statusText">Loading fleet...</p>
+      <div class="topbar-left">
+        <span class="live-dot" id="liveDot" title="Live data"></span>
+        <div>
+          <h1>NYC2WAY Live</h1>
+          <p id="statusText">Loading fleet...</p>
+        </div>
       </div>
-      <button id="refreshBtn" class="icon-btn" type="button">Refresh</button>
+      <div class="topbar-actions">
+        <button id="fitFleetBtn" class="icon-btn" type="button" title="Fit fleet on map">⊕</button>
+        <button id="darkModeBtn" class="icon-btn" type="button" title="Toggle dark mode">◑</button>
+        <button id="refreshBtn" class="icon-btn" type="button" title="Refresh data">↺</button>
+      </div>
     </header>
 
     <section class="controls">
@@ -25,8 +32,12 @@
       </div>
 
       <div class="tabs">
-        <button id="fleetTab" class="tab active" type="button">Fleet</button>
-        <button id="allTab" class="tab" type="button">All Drivers</button>
+        <button id="fleetTab" class="tab active" type="button">
+          Fleet <span id="fleetCount" class="tab-badge">0</span>
+        </button>
+        <button id="allTab" class="tab" type="button">
+          All Drivers <span id="allCount" class="tab-badge">0</span>
+        </button>
       </div>
     </section>
 
@@ -34,9 +45,9 @@
       <div id="map"></div>
     </main>
 
-    <section id="bottomSheet" class="bottom-sheet hidden" aria-live="polite">
+    <section id="bottomSheet" class="bottom-sheet" aria-live="polite">
       <div class="sheet-handle"></div>
-      <button id="closeSheetBtn" class="close-btn" type="button">×</button>
+      <button id="closeSheetBtn" class="close-btn" type="button" aria-label="Close">×</button>
 
       <div class="sheet-profile">
         <img id="sheetPhoto" class="driver-photo large" alt="Driver photo" />
